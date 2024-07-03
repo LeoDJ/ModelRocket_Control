@@ -6,17 +6,20 @@
 String consoleBuf = "";
 
 const char * help_text = R""""(Simple Rocket CLI Help
-help        - prints this help
-ls          - list files in flash
-dump <id>   - dumps the telemetry file with the given ID
-delete <id> - delte telemetry file
-format      - deletes all telemetry files (use with caution)
+help            - prints this help
+ls              - list files in flash
+dump <id>       - dumps the telemetry file with the given ID
+hexdump <id>    - dumps a file as hex
+delete <id>     - delte telemetry file
+format          - deletes all telemetry files (use with caution)
 )"""";
 
 bool formatInitiated = false;
 
 void consoleHandle(String input) {
     String token[5];
+
+    // Split input string by spaces
     int numParsedTokens = 0;
     int nextTokenIdx = 0;
     for (int i = 0; i < sizeof(token) / sizeof(token[0]); i++) {
@@ -30,6 +33,7 @@ void consoleHandle(String input) {
         numParsedTokens++;
     }
 
+    // handle commands
     String cmd = token[0];
     if (cmd == "") {
         // do nothing
@@ -42,6 +46,12 @@ void consoleHandle(String input) {
     }
     else if (cmd == "dump") {
         // TODO
+    }
+    else if (cmd == "hexdump") {
+        if (numParsedTokens >= 2) {
+            int id = token[1].toInt();
+            telemetryHexdump(id);
+        }
     }
     else if (cmd == "delete") {
         if (numParsedTokens >= 2) {
