@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <telemetry.h>
 
 #define CONSOLE_UART Serial
 
@@ -42,7 +43,7 @@ void consoleHandle(String input) {
         Serial.println(help_text);
     }
     else if (cmd == "ls") {
-        listDir(LittleFS, "/", 1);
+        telemetry.fs.listDir(LittleFS, "/", 1);
     }
     else if (cmd == "dump") {
         // TODO
@@ -50,13 +51,13 @@ void consoleHandle(String input) {
     else if (cmd == "hexdump") {
         if (numParsedTokens >= 2) {
             int id = token[1].toInt();
-            telemetryHexdump(id);
+            telemetry.fs.hexdump(id);
         }
     }
     else if (cmd == "delete") {
         if (numParsedTokens >= 2) {
             int id = token[1].toInt();
-            telemetryDeleteFile(id);
+            telemetry.fs.deleteFile(id);
         }
     }
     else if (cmd == "format") {
@@ -67,7 +68,7 @@ void consoleHandle(String input) {
     }
     else if (cmd == "yes") {
         if (formatInitiated) {
-            telemetryFormat();
+            telemetry.fs.format();
             formatInitiated = false;
         }
     }

@@ -17,7 +17,6 @@ const int servoNum = sizeof(servoPins) / sizeof(servoPins[0]);
 Servo* servos[servoNum] = {0};
 
 void setup() {
-    sizeof(data_log_t);
     // ESP32PWM::allocateTimer(0);
 
     pinMode(2, OUTPUT);
@@ -37,7 +36,7 @@ void setup() {
 
     Wire.setPins(2, 3);
     
-    telemetryInit();
+    telemetry.init();
     // bmeInit();
     // imuInit();
     gpsInit();
@@ -47,6 +46,6 @@ void loop() {
     // bmeLoop();
     // imuLoop();
     gpsLoop();
-    telemetryLoop();
+    telemetry.loop();
     consoleLoop();
 }
