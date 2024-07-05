@@ -1,7 +1,8 @@
 #pragma once
 
-#include "FS.h"
+#include <FS.h>
 #include <LittleFS.h>
+#include "radio.h"
 
 class TelemetryFS {
     protected: 
@@ -206,9 +207,9 @@ class Telemetry {
     } __attribute__((packed)) logEntryDef_t;
 
     inline static logEntryDef_t logEntryDef[] = {
-        // type         | name           | multiplier (optional)
+        // type         | name (len: 16) | multiplier (optional)
         { T_U32,        "millis",                   },
-        { T_I16,        "height",                   },
+        { T_I16,        "height",           10,     },
         { T_I8,         "temp_c",                   },
         { T_I16_VEC3,   "accel",                    },
         { T_I16_VEC3,   "gyro",                     },
@@ -259,7 +260,8 @@ class Telemetry {
     }
 
     bool commit() {
-        bool success = fs.write(logEntryBuf, sizeof(logEntryBufSize));
+        radio.send(logEntryBuf, logEntryBufSize);
+        bool success = fs.write(logEntryBuf, logEntryBufSize);
         if (success) {
             memset(logEntryBuf, 0, logEntryBufSize);
 
@@ -267,7 +269,7 @@ class Telemetry {
         return success;
     }
 
-    void init() {
+    void init(bool receiver = false) {
         fs.init();
 
         flashEntryHeader_t header = {
@@ -276,6 +278,8 @@ class Telemetry {
         };
         fs.write((uint8_t*)&header, sizeof(header));
         fs.write((uint8_t*)&logEntryDef, sizeof(logEntryDef));
+
+        radio.init(receiver);
     }
 
     void loop() {
