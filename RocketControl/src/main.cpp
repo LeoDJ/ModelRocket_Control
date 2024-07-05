@@ -42,10 +42,24 @@ void setup() {
     gpsInit();
 }
 
+unsigned long lastSend = 0;
+
 void loop() {
     // bmeLoop();
     // imuLoop();
     gpsLoop();
     telemetry.loop();
     consoleLoop();
+
+    if (millis() - lastSend > 100) {
+        lastSend = millis();
+
+        uint32_t ms = millis();
+        // telemetryWriteRaw((uint8_t*)&data, sizeof(data));
+        int16_t height = 123;
+        telemetry.set("millis", ms);
+        telemetry.set("height", &height);
+
+        telemetry.commit();
+    }
 }

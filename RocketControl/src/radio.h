@@ -23,12 +23,13 @@ class Radio {
 
         // Set device as a Wi-Fi Station
         WiFi.mode(WIFI_STA);
+        // Set Long Range Mode
+        esp_wifi_set_protocol( WIFI_IF_STA , WIFI_PROTOCOL_LR); 
+        
         WiFi.disconnect(); // we do not actually want to connect to a WiFi network
 
         ESP_ERROR_CHECK(esp_wifi_set_channel(CHANNEL, WIFI_SECOND_CHAN_NONE));
         
-        // Set Long Range Mode
-        esp_wifi_set_protocol( WIFI_IF_STA , WIFI_PROTOCOL_LR); 
 
         // Initialize ESP-NOW
         esp_err_t result = esp_now_init();

@@ -163,24 +163,24 @@ class Telemetry {
 
     public:
     // 64 Byte @ 100Hz would last around 156s per MB
-    struct {
-        uint32_t millis;
-        int16_t height_dm;
-        int8_t temp_c;
-        int8_t padding;
-        int16_t accel[3];
-        int16_t gyro[3];
-        int16_t magnet[3];
-        // int16_t linearAccel[3];
-        // int16_t gravity[3];
-        int16_t rotation[3];
-        // int16_t geomagRotation[3];
-        // int16_t gameRotation[3];
-        uint8_t servoPos[5];
-        float gpsLat;
-        float gpsLon;
-        int16_t gpsAlt;
-    } __attribute__((packed)) dataLog_t;
+    // struct {
+    //     uint32_t millis;
+    //     int16_t height_dm;
+    //     int8_t temp_c;
+    //     int8_t padding;
+    //     int16_t accel[3];
+    //     int16_t gyro[3];
+    //     int16_t magnet[3];
+    //     // int16_t linearAccel[3];
+    //     // int16_t gravity[3];
+    //     int16_t rotation[3];
+    //     // int16_t geomagRotation[3];
+    //     // int16_t gameRotation[3];
+    //     uint8_t servoPos[5];
+    //     float gpsLat;
+    //     float gpsLon;
+    //     int16_t gpsAlt;
+    // } __attribute__((packed)) dataLog_t;
 
     enum logEntryDef_type_e : uint8_t {
         T_I8,
@@ -219,7 +219,7 @@ class Telemetry {
         { T_U8,         "paraServoPos",             },
         { T_FLOAT,      "gps_lat",                  },
         { T_FLOAT,      "gps_lon",                  },
-        { T_I16,        "gps_alt",                  },
+        { T_I16,        "gps_alt",          10,     },
         { T_U8,         "gps_SV",                   },
     };
 
@@ -242,12 +242,72 @@ class Telemetry {
     }
 
     bool set(int idx, void *value) {
+        // Check if index is in valid range
         if (idx < 0 || idx >= logEntryDef_num) {
             return false;
         }
 
-        memcpy(logEntryBuf + logEntryDef[idx]._offset, value, logEntryDef[idx]._size);
+        logEntryDef_t logEntry = logEntryDef[idx];
+        // int multiplier = logEntry.multiplier;
+        // if (multiplier == 0) {
+        //     multiplier = 1;
+        // }
+
+        // void *valuePtr;
+        // switch(logEntry.type) {
+        //     case T_I8: {
+        //         int8_t val = *(int8_t*)value;  // get value from buffer
+        //         val *= multiplier;
+        //         valuePtr = &val;    // TODO: check if this is still accessible outside the scope
+        //         break;
+        //     }
+        //     case T_I16: {
+        //         int16_t val = *(int16_t*)value;  // get value from buffer
+        //         val *= multiplier;
+        //         valuePtr = &val;
+        //         break;
+        //     }
+        //     default: {
+        //         valuePtr = value;  // use raw value from buffer
+        //     }
+        // }
+
+        memcpy(logEntryBuf + logEntry._offset, value, logEntry._size);
         return true;
+    }
+
+    bool set(int idx, float value) {
+        // Check if index is in valid range
+        if (idx < 0 || idx >= logEntryDef_num) {
+            return false;
+        }
+
+        logEntryDef_t logEntry = logEntryDef[idx];
+
+        uint8_t valueBuf[16];
+        void *valuePtr;
+        int multiplier = logEntry.multiplier;
+        if (multiplier == 0) {
+            multiplier = 1;
+        }
+
+        // Multiply value in place
+        value *= multiplier;
+
+        switch(logEntry.type) {
+            case T_I8:      *(int8_t*)&valueBuf = value;    break;
+            case T_I16:     *(int16_t*)&valueBuf = value;   break;
+            case T_I32:     *(int32_t*)&valueBuf = value;   break;
+            case T_U8:      *(uint8_t*)&valueBuf = value;   break;
+            case T_U16:     *(uint16_t*)&valueBuf = value;  break;
+            case T_U32:     *(uint32_t*)&valueBuf = value;  break;
+            case T_FLOAT:   *(float*)&valueBuf = value;     break;
+            default:        
+                Serial.printf("[Telem] Error: No converter for type %d defined.\n", logEntry.type); 
+                return false;
+        }
+
+        return set(idx, valueBuf); 
     }
 
     bool set(const char *fieldName, void *value) {
@@ -258,6 +318,18 @@ class Telemetry {
         }
         return false;
     }
+
+    bool set(const char *fieldName, float value) {
+        for (int i = 0; i < logEntryDef_num; i++) {
+            if (strcmp(fieldName, logEntryDef[i].name) == 0) {
+                return set(i, value);
+            }
+        }
+        return false;
+    }
+
+
+    // void dump()
 
     bool commit() {
         radio.send(logEntryBuf, logEntryBufSize);
@@ -285,15 +357,7 @@ class Telemetry {
     void loop() {
         if (millis() - lastTelemFlush >= FILE_FLUSH_INTERVAL) {
             lastTelemFlush = millis();
-
-            // Test stuff
-            uint32_t ms = millis();
-            // telemetryWriteRaw((uint8_t*)&data, sizeof(data));
-            set("millis", &ms);
-            commit();
-
             fs.flush();
-
         }
     }
 
