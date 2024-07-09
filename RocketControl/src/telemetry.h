@@ -18,7 +18,7 @@ class TelemetryFS {
         openNextTelemFile();
     }
 
-    void printHex(uint8_t* buf, size_t size, size_t viewOffset = 0) {
+    static void printHex(uint8_t* buf, size_t size, size_t viewOffset = 0) {
         if (!viewOffset) {
             printf("           ");
             for(uint8_t i = 0; i < 16; i++) {
@@ -248,35 +248,12 @@ class Telemetry {
         }
 
         logEntryDef_t logEntry = logEntryDef[idx];
-        // int multiplier = logEntry.multiplier;
-        // if (multiplier == 0) {
-        //     multiplier = 1;
-        // }
-
-        // void *valuePtr;
-        // switch(logEntry.type) {
-        //     case T_I8: {
-        //         int8_t val = *(int8_t*)value;  // get value from buffer
-        //         val *= multiplier;
-        //         valuePtr = &val;    // TODO: check if this is still accessible outside the scope
-        //         break;
-        //     }
-        //     case T_I16: {
-        //         int16_t val = *(int16_t*)value;  // get value from buffer
-        //         val *= multiplier;
-        //         valuePtr = &val;
-        //         break;
-        //     }
-        //     default: {
-        //         valuePtr = value;  // use raw value from buffer
-        //     }
-        // }
 
         memcpy(logEntryBuf + logEntry._offset, value, logEntry._size);
         return true;
     }
 
-    bool set(int idx, float value) {
+    bool set(int idx, float val1, float val2 = 0, float val3 = 0, float val4 = 0) {
         // Check if index is in valid range
         if (idx < 0 || idx >= logEntryDef_num) {
             return false;
@@ -292,16 +269,30 @@ class Telemetry {
         }
 
         // Multiply value in place
-        value *= multiplier;
+        val1 *= multiplier;
+        val2 *= multiplier;
+        val3 *= multiplier;
+        val4 *= multiplier;
 
         switch(logEntry.type) {
-            case T_I8:      *(int8_t*)&valueBuf = value;    break;
-            case T_I16:     *(int16_t*)&valueBuf = value;   break;
-            case T_I32:     *(int32_t*)&valueBuf = value;   break;
-            case T_U8:      *(uint8_t*)&valueBuf = value;   break;
-            case T_U16:     *(uint16_t*)&valueBuf = value;  break;
-            case T_U32:     *(uint32_t*)&valueBuf = value;  break;
-            case T_FLOAT:   *(float*)&valueBuf = value;     break;
+            case T_I8:      *(int8_t*)&valueBuf = val1;    break;
+            case T_I16:     *(int16_t*)&valueBuf = val1;   break;
+            case T_I32:     *(int32_t*)&valueBuf = val1;   break;
+            case T_U8:      *(uint8_t*)&valueBuf = val1;   break;
+            case T_U16:     *(uint16_t*)&valueBuf = val1;  break;
+            case T_U32:     *(uint32_t*)&valueBuf = val1;  break;
+            case T_FLOAT:   *(float*)&valueBuf = val1;     break;
+            case T_I16_VEC3:
+                ((int16_t*)&valueBuf)[0] = val1;
+                ((int16_t*)&valueBuf)[1] = val2;
+                ((int16_t*)&valueBuf)[2] = val3;
+                break;
+            case T_U8_VEC4:
+                ((uint8_t*)&valueBuf)[0] = val1;
+                ((uint8_t*)&valueBuf)[1] = val2;
+                ((uint8_t*)&valueBuf)[2] = val3;
+                ((uint8_t*)&valueBuf)[3] = val4;
+                break;
             default:        
                 Serial.printf("[Telem] Error: No converter for type %d defined.\n", logEntry.type); 
                 return false;
@@ -311,21 +302,64 @@ class Telemetry {
     }
 
     bool set(const char *fieldName, void *value) {
-        for (int i = 0; i < logEntryDef_num; i++) {
-            if (strcmp(fieldName, logEntryDef[i].name) == 0) {
-                return set(i, value);
-            }
+        int idx = getIndex(fieldName);
+        if (idx >= 0) {
+            return set(idx, value);
         }
         return false;
     }
 
-    bool set(const char *fieldName, float value) {
-        for (int i = 0; i < logEntryDef_num; i++) {
-            if (strcmp(fieldName, logEntryDef[i].name) == 0) {
-                return set(i, value);
-            }
+    bool set(const char *fieldName, float val1, float val2 = 0, float val3 = 0, float val4 = 0) {
+        int idx = getIndex(fieldName);
+        if (idx >= 0) {
+            return set(idx, val1, val2, val3, val4);
         }
         return false;
+    }
+
+    float get(uint8_t* buf, int idx) {
+        // Check if index is in valid range
+        if (idx < 0 || idx >= logEntryDef_num) {
+            return false;
+        }
+
+
+        logEntryDef_t logEntry = logEntryDef[idx];
+        int multiplier = logEntry.multiplier;
+        if (multiplier == 0) {
+            multiplier = 1;
+        }
+
+        float val = NAN;
+
+        void *bufPtr = buf + logEntry._offset;
+
+        switch(logEntry.type) {
+            case T_I8:      val = *(int8_t*)bufPtr;     break;
+            case T_I16:     val = *(int16_t*)bufPtr;    break;
+            case T_I32:     val = *(int32_t*)bufPtr;    break;
+            case T_U8:      val = *(uint8_t*)bufPtr;    break;
+            case T_U16:     val = *(uint16_t*)bufPtr;   break;
+            case T_U32:     val = *(uint32_t*)bufPtr;   break;
+            case T_FLOAT:   val = *(float*)bufPtr;      break;
+            default:        
+                Serial.printf("[Telem] Error: No converter for type %d defined.\n", logEntry.type); 
+                return false;
+        }
+        // Serial.printf(" %d: %08X, %f\n", idx, *(uint32_t*)bufPtr, val);
+
+        // Multiply value in place
+        val /= multiplier;
+
+        return val; 
+    }
+
+    float get(uint8_t* buf, const char *fieldName) {
+        int idx = getIndex(fieldName);
+        if (idx >= 0) {
+            return get(buf, idx);
+        }
+        return NAN;
     }
 
 
@@ -346,7 +380,7 @@ class Telemetry {
 
         flashEntryHeader_t header = {
             .headerSize = sizeof(flashEntryHeader_t) + sizeof(logEntryDef),
-            .numLogEntryDefs = logEntryDef_num,
+            .numLogEntryDefs = (uint16_t)logEntryDef_num,
         };
         fs.write((uint8_t*)&header, sizeof(header));
         fs.write((uint8_t*)&logEntryDef, sizeof(logEntryDef));
@@ -369,6 +403,15 @@ class Telemetry {
     uint8_t *logEntryBuf = nullptr;
     const int logEntryDef_num = sizeof(logEntryDef)/sizeof(logEntryDef[0]);
     uint32_t lastTelemFlush = 0;
+
+    int getIndex(const char *fieldName) {
+        for (int i = 0; i < logEntryDef_num; i++) {
+            if (strcmp(fieldName, logEntryDef[i].name) == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
 };
 
 inline Telemetry telemetry;
