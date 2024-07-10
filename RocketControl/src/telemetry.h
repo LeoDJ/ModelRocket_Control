@@ -153,6 +153,15 @@ class TelemetryFS {
         return false;
     }
 
+    File open(int id) {
+        char path[32] = {0};
+        snprintf(path, sizeof(path), FOLDER_NAME "/" FILE_FORMAT, id);
+        if (LittleFS.exists(path)) {
+            return LittleFS.open(path, FILE_READ);
+        }
+        return File();
+    }
+
     protected:
     File _telemFile;
 };
@@ -201,8 +210,8 @@ class Telemetry {
 
     typedef struct {
         logEntryDef_type_e type;
-        const char name[16];
-        uint16_t multiplier;
+        char name[16];
+        float multiplier;
         uint16_t _size, _offset;    // auto generated
     } __attribute__((packed)) logEntryDef_t;
 
@@ -211,22 +220,25 @@ class Telemetry {
         { T_U32,        "millis",                   },
         { T_I16,        "height",           10,     },
         { T_I8,         "temp_c",                   },
-        { T_I16_VEC3,   "accel",                    },
-        { T_I16_VEC3,   "gyro",                     },
-        { T_I16_VEC3,   "magn",                     },
-        { T_I16_VEC3,   "rotation",                 },
-        { T_U8_VEC4,    "finServoPos",              },
-        { T_U8,         "paraServoPos",             },
+        { T_I16_VEC3,   "accel",            100,    },
+        { T_I16_VEC3,   "gyro",             10,     },
+        { T_I16_VEC3,   "magn",             100,    },
+        { T_I16_VEC3,   "rotation",         10,     },
+        { T_U8_VEC4,    "finServoPos",      0.5,    },
+        { T_U8,         "paraServoPos",     0.5,    },
         { T_FLOAT,      "gps_lat",                  },
         { T_FLOAT,      "gps_lon",                  },
         { T_I16,        "gps_alt",          10,     },
         { T_U8,         "gps_SV",                   },
     };
+    
+    const int logEntryDef_num = sizeof(logEntryDef)/sizeof(logEntryDef[0]);
+    int logEntryBufSize = 0;    // auto generated
 
     typedef struct {
-        size_t headerSize;
+        size_t headerSize;  // size of header + logEntryDef[]
         uint16_t numLogEntryDefs;
-        logEntryDef_t logEntryDefs[];
+        // logEntryDef_t logEntryDefs[];
     } __attribute__((packed)) flashEntryHeader_t;
 
     Telemetry() {
@@ -235,6 +247,9 @@ class Telemetry {
             int size = logEntryDef_type_size[logEntryDef[i].type];
             logEntryDef[i]._size = size;
             logEntryDef[i]._offset = offset;
+            if (logEntryDef[i].multiplier == 0) {
+                logEntryDef[i].multiplier = 1;
+            }
             offset += size;
         }
         logEntryBufSize = offset;
@@ -264,9 +279,6 @@ class Telemetry {
         uint8_t valueBuf[16];
         void *valuePtr;
         int multiplier = logEntry.multiplier;
-        if (multiplier == 0) {
-            multiplier = 1;
-        }
 
         // Multiply value in place
         val1 *= multiplier;
@@ -326,9 +338,6 @@ class Telemetry {
 
         logEntryDef_t logEntry = logEntryDef[idx];
         int multiplier = logEntry.multiplier;
-        if (multiplier == 0) {
-            multiplier = 1;
-        }
 
         float val = NAN;
 
@@ -363,7 +372,113 @@ class Telemetry {
     }
 
 
-    // void dump()
+    void printCsvHeader(logEntryDef_t *entryDefs, size_t num) {
+        for (int i = 0; i < num; i++) {
+            switch (entryDefs[i].type) {
+                case T_I16_VEC3:
+                    Serial.printf("%s.x,%s.y,%s.z", entryDefs[i].name, entryDefs[i].name, entryDefs[i].name);
+                    break;
+                case T_U8_VEC4:
+                    Serial.printf("%s.a,%s.b,%s.c,%s.d", entryDefs[i].name, entryDefs[i].name, entryDefs[i].name, entryDefs[i].name);
+                    break;
+                default:
+                    Serial.printf("%s", entryDefs[i].name);                    
+                    break;
+            }
+
+            if (i < (num - 1)) {
+                Serial.printf(",");
+            }
+        }
+        Serial.printf("\n");
+    }
+
+    void printCsvRecord(logEntryDef_t *entryDefs, size_t entryNum, const char *recordBuf) {
+        for (int i = 0; i < entryNum; i++) {
+            float multiplier = entryDefs[i].multiplier;
+            if (multiplier == 0) {
+                multiplier = 1;
+            }
+
+            union {
+                uint32_t u32;
+                int32_t i32;
+                float f32;
+                uint8_t u8_4[4];
+                int16_t i16_3[3];
+            } __attribute__((packed)) val;
+
+            memset(&val, 0, sizeof(val));
+            memcpy(&val, recordBuf + entryDefs[i]._offset, entryDefs[i]._size);
+
+            switch (entryDefs[i].type) {
+                case T_U8:
+                case T_U16:
+                case T_U32:
+                    if (multiplier <= 1)    Serial.printf("%8u", (uint32_t)(val.u32 / multiplier));
+                    else                    Serial.printf("%10g", (val.u32 / multiplier));
+                    break;
+                case T_I8:
+                case T_I16:
+                case T_I32:
+                    if (multiplier <= 1)    Serial.printf("%8d", (int32_t)(val.i32 / multiplier));
+                    else                    Serial.printf("%10g", (val.i32 / multiplier));
+                    break;
+                case T_FLOAT:   
+                    Serial.printf("%10f", (val.f32 / multiplier)); 
+                    break;
+                case T_I16_VEC3:
+                    for (int j = 0; j < 3; j++) {
+                        Serial.printf("%8g%s", (val.i16_3[j] / multiplier), j < 2 ? "," : "");
+                    }
+                    break;
+                case T_U8_VEC4:
+                    for (int j = 0; j < 4; j++) {
+                        Serial.printf("%5g%s", (val.u8_4[j] / multiplier), j < 3 ? "," : "");
+                    }
+                    break;
+            }
+
+            if (i < (entryNum - 1)) {
+                Serial.printf(",");
+            }
+        }
+        Serial.printf("\n");
+    }
+
+    void dump(int id) {
+        File file = fs.open(id);
+        if (file) {
+            flashEntryHeader_t header;
+            file.readBytes((char*)&header, sizeof(header));
+
+            size_t logEntryDefSize = header.headerSize - sizeof(flashEntryHeader_t);
+
+            if (logEntryDefSize / header.numLogEntryDefs != sizeof(logEntryDef_t)) {
+                Serial.printf("[Telem] Dump Error: incompatible log entry definition format!\n");
+                return;
+            }
+
+            logEntryDef_t fileLogEntryDefs[header.numLogEntryDefs];
+            file.readBytes((char*)fileLogEntryDefs, logEntryDefSize);
+            printCsvHeader(fileLogEntryDefs, header.numLogEntryDefs);
+
+            // calculate metadata of log entries based on the read header.
+            int logEntryRecordSize = 0;
+            for (int i = 0; i < header.numLogEntryDefs; i++) {
+                fileLogEntryDefs[i]._offset = logEntryRecordSize;
+                fileLogEntryDefs[i]._size = logEntryDef_type_size[fileLogEntryDefs[i].type];
+                logEntryRecordSize += fileLogEntryDefs[i]._size;
+            }
+
+            char buf[logEntryRecordSize];
+            while (file.available() >= logEntryRecordSize) {
+                file.readBytes(buf, logEntryRecordSize);
+                printCsvRecord(fileLogEntryDefs, header.numLogEntryDefs, buf);
+            }
+        }
+    }
+
 
     bool commit() {
         radio.send(logEntryBuf, logEntryBufSize);
@@ -399,9 +514,7 @@ class Telemetry {
     TelemetryFS fs;
 
     protected:
-    int logEntryBufSize = 0;    // auto generated
     uint8_t *logEntryBuf = nullptr;
-    const int logEntryDef_num = sizeof(logEntryDef)/sizeof(logEntryDef[0]);
     uint32_t lastTelemFlush = 0;
 
     int getIndex(const char *fieldName) {

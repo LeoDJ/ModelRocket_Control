@@ -46,7 +46,10 @@ void consoleHandle(String input) {
         telemetry.fs.listDir(LittleFS, "/", 1);
     }
     else if (cmd == "dump") {
-        // TODO
+        if (numParsedTokens >= 2) {
+            int id = token[1].toInt();
+            telemetry.dump(id);
+        }
     }
     else if (cmd == "hexdump") {
         if (numParsedTokens >= 2) {
