@@ -153,6 +153,7 @@ class TelemetryFS {
         return false;
     }
 
+    // Opens file with given numeric id from telemetry folder
     File open(int id) {
         char path[32] = {0};
         snprintf(path, sizeof(path), FOLDER_NAME "/" FILE_FORMAT, id);
@@ -168,53 +169,39 @@ class TelemetryFS {
 
 class Telemetry {
     protected:
-    const int FILE_FLUSH_INTERVAL = 500;
+    const int FILE_FLUSH_INTERVAL = 500;    // ms, interval in which the log file gets written to flash, handled in loop()
 
     public:
-    // 64 Byte @ 100Hz would last around 156s per MB
-    // struct {
-    //     uint32_t millis;
-    //     int16_t height_dm;
-    //     int8_t temp_c;
-    //     int8_t padding;
-    //     int16_t accel[3];
-    //     int16_t gyro[3];
-    //     int16_t magnet[3];
-    //     // int16_t linearAccel[3];
-    //     // int16_t gravity[3];
-    //     int16_t rotation[3];
-    //     // int16_t geomagRotation[3];
-    //     // int16_t gameRotation[3];
-    //     uint8_t servoPos[5];
-    //     float gpsLat;
-    //     float gpsLon;
-    //     int16_t gpsAlt;
-    // } __attribute__((packed)) dataLog_t;
-
+    // Available log datatypes
+    // (Need to change size array and get/set/dump functions if implementing more types)
     enum logEntryDef_type_e : uint8_t {
-        T_I8,
-        T_U8,
-        T_I16,
-        T_U16,
-        T_I32,
-        T_U32,
-        T_FLOAT,
-        T_I16_VEC3,
-        T_U8_VEC4,
-        TYPE_COUNT,   // last element
+        T_I8,           // values:   -128 ..          127
+        T_U8,           //              0 ..          255
+        T_I16,          //        -32,768 ..       32,767
+        T_U16,          //              0 ..       65,535
+        T_I32,          // -2,147,483,648 .. 2,147,483,647
+        T_U32,          //              0 .. 4,294,967,295
+        T_FLOAT,        // 7.5 valid digits, with floating decimal point
+        T_I16_VEC3,     // int16[3]
+        T_U8_VEC4,      // uint8[4]
+        TYPE_COUNT,     // last element marker, leave at end
     };
 
+    // Log datatype sizes in bytes, corresponding by index number
     uint8_t logEntryDef_type_size[TYPE_COUNT] = {
         1, 1, 2, 2, 4, 4, 4, 6, 4
     };
 
+    // Type definition of a log entry
     typedef struct {
-        logEntryDef_type_e type;
-        char name[16];
-        float multiplier;
+        logEntryDef_type_e type;    // data type to store
+        char name[16];              // field name, maximum 16 characters
+        float multiplier;           // values get multiplied by this value before saving
         uint16_t _size, _offset;    // auto generated
     } __attribute__((packed)) logEntryDef_t;
 
+    // Definition for the available telemetry log entries
+    // TODO: ability do define this outside this class, but just make changes here for now
     inline static logEntryDef_t logEntryDef[] = {
         // type         | name (len: 16) | multiplier (optional)
         { T_U32,        "millis",                   },
@@ -232,15 +219,16 @@ class Telemetry {
         { T_U8,         "gps_SV",                   },
     };
     
-    const int logEntryDef_num = sizeof(logEntryDef)/sizeof(logEntryDef[0]);
-    int logEntryBufSize = 0;    // auto generated
+    const int logEntryDef_num = sizeof(logEntryDef)/sizeof(logEntryDef[0]);     // Number of log entry definitions
+    int logEntryBufSize = 0;                                                    // auto generated, size in bytes of single log record
 
     typedef struct {
-        size_t headerSize;  // size of header + logEntryDef[]
-        uint16_t numLogEntryDefs;
-        // logEntryDef_t logEntryDefs[];
+        size_t headerSize;                  // size of header + logEntryDef[]
+        uint16_t numLogEntryDefs;           // number of log entry definitions
+        // logEntryDef_t logEntryDefs[];    // log entry definitions start here
     } __attribute__((packed)) flashEntryHeader_t;
 
+    // Constructor, initialize auto generated values and other stuff
     Telemetry() {
         int offset = 0;
         for (int i = 0; i < logEntryDef_num; i++) {
@@ -253,9 +241,10 @@ class Telemetry {
             offset += size;
         }
         logEntryBufSize = offset;
-        logEntryBuf = (uint8_t*)malloc(logEntryBufSize);
+        logEntryBuf = (uint8_t*)malloc(logEntryBufSize);    // allocate buffer for a log record
     }
 
+    // Set raw telemetry buffer value by index (normally not called manually, because indices might change. No multiplier handling)
     bool set(int idx, void *value) {
         // Check if index is in valid range
         if (idx < 0 || idx >= logEntryDef_num) {
@@ -268,6 +257,16 @@ class Telemetry {
         return true;
     }
 
+    // Set raw telemetry buffer value by field name (no multiplier handling)
+    bool set(const char *fieldName, void *value) {
+        int idx = getIndex(fieldName);
+        if (idx >= 0) {
+            return set(idx, value);
+        }
+        return false;
+    }
+
+    // Set a telemetry value by field index (normally not called manually, because indices might change)
     bool set(int idx, float val1, float val2 = 0, float val3 = 0, float val4 = 0) {
         // Check if index is in valid range
         if (idx < 0 || idx >= logEntryDef_num) {
@@ -313,14 +312,10 @@ class Telemetry {
         return set(idx, valueBuf); 
     }
 
-    bool set(const char *fieldName, void *value) {
-        int idx = getIndex(fieldName);
-        if (idx >= 0) {
-            return set(idx, value);
-        }
-        return false;
-    }
-
+    // Set a telemetry value by field name (e.g. telemetry.set("millis", 1234))
+    // You need to pay attention to the data type in logEntryDef[], *_VEC3 / *_VEC4 expect 3 and 4 values respectively
+    // It automatically handles the conversion from a float to the more compact data type representation
+    // But it will overflow the target data type without checks, so you need to set the multiplier in logEntryDef[] so your data will fit.
     bool set(const char *fieldName, float val1, float val2 = 0, float val3 = 0, float val4 = 0) {
         int idx = getIndex(fieldName);
         if (idx >= 0) {
@@ -371,7 +366,7 @@ class Telemetry {
         return NAN;
     }
 
-
+    // Prints the header (log entry definitions) in a CSV-compatible representation
     void printCsvHeader(logEntryDef_t *entryDefs, size_t num) {
         for (int i = 0; i < num; i++) {
             switch (entryDefs[i].type) {
@@ -386,6 +381,7 @@ class Telemetry {
                     break;
             }
 
+            // Print comma, unless last field name
             if (i < (num - 1)) {
                 Serial.printf(",");
             }
@@ -393,6 +389,7 @@ class Telemetry {
         Serial.printf("\n");
     }
 
+    // Prints the values of a single log record
     void printCsvRecord(logEntryDef_t *entryDefs, size_t entryNum, const char *recordBuf) {
         for (int i = 0; i < entryNum; i++) {
             float multiplier = entryDefs[i].multiplier;
@@ -400,6 +397,8 @@ class Telemetry {
                 multiplier = 1;
             }
 
+            // Define possible value datatypes as union like this to make handling easier
+            // TODO: maybe put definition somewhere else? Idk if it has a performance impact
             union {
                 uint32_t u32;
                 int32_t i32;
@@ -408,15 +407,16 @@ class Telemetry {
                 int16_t i16_3[3];
             } __attribute__((packed)) val;
 
-            memset(&val, 0, sizeof(val));
-            memcpy(&val, recordBuf + entryDefs[i]._offset, entryDefs[i]._size);
+            memset(&val, 0, sizeof(val));   // clear value
+            memcpy(&val, recordBuf + entryDefs[i]._offset, entryDefs[i]._size); // copy raw value from buffer to val
 
+            // Print value according to datatype
             switch (entryDefs[i].type) {
                 case T_U8:
                 case T_U16:
                 case T_U32:
-                    if (multiplier <= 1)    Serial.printf("%8u", (uint32_t)(val.u32 / multiplier));
-                    else                    Serial.printf("%10g", (val.u32 / multiplier));
+                    if (multiplier <= 1)    Serial.printf("%8u", (uint32_t)(val.u32 / multiplier)); // if resulting number has no decimal point, print as integer
+                    else                    Serial.printf("%10g", (val.u32 / multiplier));          // else print shortest float representation
                     break;
                 case T_I8:
                 case T_I16:
@@ -439,6 +439,7 @@ class Telemetry {
                     break;
             }
 
+            // Print comma, unless last field name
             if (i < (entryNum - 1)) {
                 Serial.printf(",");
             }
@@ -446,6 +447,7 @@ class Telemetry {
         Serial.printf("\n");
     }
 
+    // Prints a CSV-compatible representation of a stored log file
     void dump(int id) {
         File file = fs.open(id);
         if (file) {
@@ -479,7 +481,8 @@ class Telemetry {
         }
     }
 
-
+    // Call this after setting all telemetry values via set()
+    // It saves the values to the flash and sends them via the ESP-NOW radio link
     bool commit() {
         radio.send(logEntryBuf, logEntryBufSize);
         bool success = fs.write(logEntryBuf, logEntryBufSize);
@@ -490,6 +493,8 @@ class Telemetry {
         return success;
     }
 
+    // Call this in your setup() to initialize the telemetry functionality
+    // Probably leads to weird errors, if not called.
     void init(bool receiver = false) {
         fs.init();
 
@@ -503,6 +508,7 @@ class Telemetry {
         radio.init(receiver);
     }
 
+    // Call this repeatedly in your main loop()
     void loop() {
         if (millis() - lastTelemFlush >= FILE_FLUSH_INTERVAL) {
             lastTelemFlush = millis();
@@ -517,6 +523,7 @@ class Telemetry {
     uint8_t *logEntryBuf = nullptr;
     uint32_t lastTelemFlush = 0;
 
+    // Get the log entry index from a field name, returns -1 if not found
     int getIndex(const char *fieldName) {
         for (int i = 0; i < logEntryDef_num; i++) {
             if (strcmp(fieldName, logEntryDef[i].name) == 0) {

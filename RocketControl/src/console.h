@@ -86,6 +86,7 @@ void consoleHandle(String input) {
 
 }
 
+// Call this in your main loop() repeatedly
 void consoleLoop() {
     while (CONSOLE_UART.available()) {
         char c = CONSOLE_UART.read();
