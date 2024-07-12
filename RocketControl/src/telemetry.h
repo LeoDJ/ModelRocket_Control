@@ -211,8 +211,8 @@ class Telemetry {
         { T_I16_VEC3,   "gyro",             10,     },
         { T_I16_VEC3,   "magn",             100,    },
         { T_I16_VEC3,   "rotation",         10,     },
-        { T_U8_VEC4,    "finServoPos",      0.5,    },
-        { T_U8,         "paraServoPos",     0.5,    },
+        { T_U8_VEC4,    "finServoPos",              },
+        { T_U8,         "paraServoPos",             },
         { T_FLOAT,      "gps_lat",                  },
         { T_FLOAT,      "gps_lon",                  },
         { T_I16,        "gps_alt",          10,     },
@@ -242,6 +242,7 @@ class Telemetry {
         }
         logEntryBufSize = offset;
         logEntryBuf = (uint8_t*)malloc(logEntryBufSize);    // allocate buffer for a log record
+        memset(logEntryBuf, 0, logEntryBufSize);
     }
 
     // Set raw telemetry buffer value by index (normally not called manually, because indices might change. No multiplier handling)
@@ -415,14 +416,14 @@ class Telemetry {
                 case T_U8:
                 case T_U16:
                 case T_U32:
-                    if (multiplier <= 1)    Serial.printf("%8u", (uint32_t)(val.u32 / multiplier)); // if resulting number has no decimal point, print as integer
-                    else                    Serial.printf("%10g", (val.u32 / multiplier));          // else print shortest float representation
+                    if (multiplier <= 1)    Serial.printf("%8u", (uint32_t)((float)val.u32 / multiplier)); // if resulting number has no decimal point, print as integer
+                    else                    Serial.printf("%10g", ((float)val.u32 / multiplier));          // else print shortest float representation
                     break;
                 case T_I8:
                 case T_I16:
                 case T_I32:
-                    if (multiplier <= 1)    Serial.printf("%8d", (int32_t)(val.i32 / multiplier));
-                    else                    Serial.printf("%10g", (val.i32 / multiplier));
+                    if (multiplier <= 1)    Serial.printf("%8d", (int32_t)((float)val.i32 / multiplier));
+                    else                    Serial.printf("%10g", ((float)val.i32 / multiplier));
                     break;
                 case T_FLOAT:   
                     Serial.printf("%10f", (val.f32 / multiplier)); 
@@ -487,7 +488,7 @@ class Telemetry {
         radio.send(logEntryBuf, logEntryBufSize);
         bool success = fs.write(logEntryBuf, logEntryBufSize);
         if (success) {
-            memset(logEntryBuf, 0, logEntryBufSize);
+            // memset(logEntryBuf, 0, logEntryBufSize);
 
         }
         return success;
